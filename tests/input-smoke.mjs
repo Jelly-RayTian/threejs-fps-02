@@ -1,0 +1,20 @@
+// Exercise the real UI and entry module. Only browser/graphics/audio host APIs are stubbed.
+import vm from 'node:vm';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {resolve,dirname} from 'node:path';
+import * as THREE from '../game/vendor/three/three.module.min.js';
+const noop=()=>{},drawing=new Proxy({},{get:()=>noop,set:()=>true}),listeners={},elements=new Map();
+function element(){return{hidden:false,style:{},children:[],textContent:'',innerHTML:'',firstElementChild:{style:{}},appendChild(child){this.children.push(child);},getContext:()=>drawing};}
+const html=readFileSync('game/index.html','utf8');for(const match of html.matchAll(/id="([^"]+)"/g))elements.set(match[1],element());elements.get('buy').hidden=true;
+function listen(name,cb){(listeners[name]??=[]).push(cb);}function emit(name,e={}){for(const cb of listeners[name]||[])cb({preventDefault:noop,...e});}
+const doc={createElement:element,getElementById:id=>{assert(elements.has(id),`DOM id ${id}`);return elements.get(id);},addEventListener:listen,body:{classList:{toggle:noop}},pointerLockElement:null,exitPointerLock(){this.pointerLockElement=null;emit('pointerlockchange');}};
+class Renderer{constructor(){this.shadowMap={};this.domElement=element();this.domElement.requestPointerLock=()=>{doc.pointerLockElement=this.domElement;emit('pointerlockchange');};}setPixelRatio(){}setSize(){}render(scene,camera){scene.updateMatrixWorld(true);camera.updateMatrixWorld(true);}}
+const gain=()=>({connect:noop,gain:{value:1,setValueAtTime:noop,exponentialRampToValueAtTime:noop}});
+class Audio{constructor(){this.state='running';this.currentTime=0;this.sampleRate=8000;}resume(){}createGain(){return gain();}createOscillator(){return{connect:noop,start:noop,stop:noop,frequency:{setValueAtTime:noop,exponentialRampToValueAtTime:noop}};}createBuffer(ch,n){return{getChannelData:()=>new Float32Array(n)};}createBufferSource(){return{connect:noop,start:noop,stop:noop};}createBiquadFilter(){return{connect:noop,frequency:{}};}}
+let frame;const window={};const context=vm.createContext({console,Map,Math,Float32Array,Float64Array,Uint16Array,Uint32Array,Int16Array,Array,Infinity,URLSearchParams,location:{search:''},performance:{now:()=>0},devicePixelRatio:1,innerWidth:1280,innerHeight:720,document:doc,addEventListener:listen,AudioContext:Audio,window,requestAnimationFrame:cb=>{frame=cb;}});
+const three=new vm.SyntheticModule(Object.keys(THREE),function(){for(const name of Object.keys(THREE))this.setExport(name,name==='WebGLRenderer'?Renderer:THREE[name]);},{context});
+const cache=new Map();function load(file){file=resolve(file);if(cache.has(file))return cache.get(file);const m=new vm.SourceTextModule(readFileSync(file,'utf8'),{context,identifier:file});cache.set(file,m);return m;}
+const main=load('game/src/main.js');await main.link((name,parent)=>name==='three'?three:load(resolve(dirname(parent.identifier),name)));await main.evaluate();let now=0;function advance(seconds){for(let i=0;i<seconds*60;i++){now+=1000/60;frame(now);}}
+elements.get('play').onclick();assert(elements.get('menu').hidden);emit('keydown',{code:'KeyB'});assert(!elements.get('buy').hidden);elements.get('shop').children[1].onclick();assert.equal(window.sunbreak.state.actors[0].weapon,'tern');elements.get('closebuy').onclick();advance(16);assert.equal(window.sunbreak.state.phase,'live');const p=window.sunbreak.state.actors[0],start=p.z;emit('keydown',{code:'KeyW'});advance(.5);emit('keyup',{code:'KeyW'});assert(p.z<start-.5);const yaw=p.yaw;emit('mousemove',{movementX:20,movementY:5});assert(p.yaw<yaw);emit('mousedown',{button:0});advance(.2);emit('mouseup',{button:0});assert(p.ammo<24);emit('keydown',{code:'KeyR'});assert(p.reload>0);emit('keydown',{code:'Tab'});assert(!elements.get('roster').hidden);emit('keyup',{code:'Tab'});assert(elements.get('roster').hidden);doc.exitPointerLock();assert(!elements.get('menu').hidden);
+console.log('PASS: deploy/pause, supply UI, purchases, round clock, keyboard movement, mouse look, firing, reload, roster. Browser host APIs stubbed.');
